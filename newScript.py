@@ -7,8 +7,9 @@ import time
 import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
+# REMOVED: Unnecessary imports
+# from selenium.webdriver.chrome.service import Service as ChromeService
+# from webdriver_manager.chrome import ChromeDriverManager
 import logging
 from datetime import datetime
 import io
@@ -55,26 +56,36 @@ class StreamlitEcommerceScraper:
             'product_details': ['.product-info']
         }
 
+    # --- THIS IS THE CORRECTED FUNCTION ---
     def setup_selenium(self):
         try:
             st.info("🚀 Setting up a lightweight browser instance...")
             chrome_options = Options()
-            if self.headless: chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
+            if self.headless: chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--log-level=3')
             chrome_options.add_argument('--disable-logging')
             if self.disable_images: chrome_options.add_argument('--blink-settings=imagesEnabled=false')
 
-            self.driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()),
-                                           options=chrome_options)
+            # This is the key change:
+            # We no longer use webdriver-manager.
+            # Selenium will automatically detect the chromedriver that we installed
+            # via the packages.txt file in the system's PATH.
+            self.driver = webdriver.Chrome(options=chrome_options)
+
             st.success("✅ Browser is ready!")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize Selenium: {e}")
-            st.error(f"Selenium setup failed: {e}")
+            # Provide a more helpful error message for this specific context
+            st.error(f"""
+            **Selenium setup failed!** This usually means there's an issue with the browser environment.
+            - **Error:** {e}
+            - **Troubleshooting:** Ensure your `packages.txt` file contains `chromium` and `chromium-driver`.
+            """)
             return False
 
     def get_page_content(self, url):
@@ -230,14 +241,14 @@ def main():
     max_products = col1.number_input("📦 Max products to scrape", 1, 1000, 50)
     max_pages = col2.number_input("📄 Max pages to scan", 1, 50, 5)
 
-    # --- NEW: File uploader for appending data ---
     uploaded_file = st.file_uploader(
         "Optional: Upload a CSV/Excel file to append data to",
         type=['csv', 'xlsx']
     )
 
     with st.expander("🔧 Advanced & Export Options"):
-        use_selenium = st.checkbox("Use Browser (Slower)", value=False, help="Enable for sites that need JavaScript.")
+        use_selenium = st.checkbox("Use Browser (Slower)", value=True,
+                                   help="Enable for sites that need JavaScript. This is required for deployment on Streamlit Cloud.")
         disable_images = st.checkbox("Disable Images (Faster)", value=True, help="Speeds up browser page loads.")
         file_format = st.radio("Export File Format", ["Excel", "CSV"], horizontal=True)
 
@@ -251,7 +262,6 @@ def main():
         if not website_url.startswith(('http://', 'https://')):
             website_url = 'https://' + website_url
 
-        # --- NEW: Logic to read existing file data ---
         existing_df = None
         if uploaded_file is not None:
             try:
@@ -263,7 +273,7 @@ def main():
                 st.success("✅ Existing data loaded. New data will be appended.")
             except Exception as e:
                 st.error(f"❌ Error reading file: {e}")
-                return  # Stop execution if file is invalid
+                return
 
         scraper = StreamlitEcommerceScraper(website_url, use_selenium, disable_images=disable_images)
         progress_container = st.empty()
@@ -278,17 +288,14 @@ def main():
                 duration = time.time() - start_time
                 new_df = pd.DataFrame(products)
 
-                # --- NEW: Combine old and new data if applicable ---
                 if existing_df is not None:
                     st.info("Appending new data to the existing file...")
-                    # Combine, ensuring columns align and new ones are added
                     final_df = pd.concat([existing_df, new_df], ignore_index=True)
                 else:
-                    final_df = new_df  # No existing file, use only new data
+                    final_df = new_df
 
                 st.success(f"✅ Scraped {len(new_df)} new products in {duration:.2f} seconds! Displaying combined data.")
 
-                # --- Process the FINAL DataFrame ---
                 final_df.replace('', pd.NA, inplace=True)
                 final_df.dropna(axis=1, how='all', inplace=True)
                 final_df.fillna("", inplace=True)
@@ -301,12 +308,9 @@ def main():
 
                 st.dataframe(final_df, use_container_width=True)
 
-                # Determine filename
                 if uploaded_file is not None:
-                    # Use the name of the uploaded file for the download
                     filename = uploaded_file.name
                 else:
-                    # Create a new filename
                     domain = urlparse(website_url).netloc.replace('.', '_')
                     ext = 'xlsx' if file_format == 'Excel' else 'csv'
                     filename = f"{domain}_products_{datetime.now():%Y%m%d}.{ext}"

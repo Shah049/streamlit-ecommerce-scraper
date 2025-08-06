@@ -1,3 +1,2 @@
 chromium
 chromium-driver
-```    These are the correct, modern names for the browser and its corresponding driver on the system Streamlit uses.
